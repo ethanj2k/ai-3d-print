@@ -54,8 +54,13 @@ Downloaded: use the file as-is.
 
 ## This printer
 
-FlashForge Adventurer 5M. 220 x 220 x 220 mm. 0.4 mm nozzle. PLA.
-The slicer defaults are already correct for it — only override on request.
+FlashForge Adventurer 5M. 220 x 220 x 220 mm. 0.4 mm nozzle.
+
+Slicing defaults to PLA. **Confirm which filament is loaded before slicing** and pass it
+if it is not PLA — PETG needs 255 C against PLA's 220 C, and slicing one as the other
+ruins the print. Ask once and remember it for the session.
+
+PETG also welds itself to the PEI plate. Remind the user to glue-stick the bed first.
 
 ## Design rules
 
