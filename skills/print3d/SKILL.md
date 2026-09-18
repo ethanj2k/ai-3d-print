@@ -37,13 +37,17 @@ Design-only ends here: give the file path, done.
 
 Review = no: skip to 6 without pausing.
 
-**6. Print**
+**6. Ask:** "What filament is loaded — PLA or PETG?"
+Ask once per session, then remember it. Never guess.
+PETG: pass it to `scad_slice` and remind them to glue-stick the plate.
+
+**7. Print**
 Modelled from scratch: `scad_export` to STL. Must report manifold yes and fit the build volume. If not, return to 4b.
 Downloaded: use the file as-is.
 `scad_slice`. Report print time and filament used.
 `printer_print` with startNow.
 
-**7. Monitor**
+**8. Monitor**
 `printer_status` on request. Report progress and time remaining.
 
 ## Never
@@ -56,11 +60,11 @@ Downloaded: use the file as-is.
 
 FlashForge Adventurer 5M. 220 x 220 x 220 mm. 0.4 mm nozzle.
 
-Slicing defaults to PLA. **Confirm which filament is loaded before slicing** and pass it
-if it is not PLA — PETG needs 255 C against PLA's 220 C, and slicing one as the other
-ruins the print. Ask once and remember it for the session.
+Usually PLA, sometimes PETG. Slicing defaults to PLA — always ask, never assume.
+PETG runs 255 C against PLA's 220 C, so slicing one as the other ruins the print.
 
-PETG also welds itself to the PEI plate. Remind the user to glue-stick the bed first.
+PETG welds itself to the PEI plate and can tear the coating off. Remind them to
+glue-stick the bed first, every time.
 
 ## Design rules
 
