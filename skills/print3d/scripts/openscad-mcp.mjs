@@ -8,7 +8,8 @@
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, statSync } from "node:fs";
 import { tmpdir, networkInterfaces } from "node:os";
-import { join, resolve, basename, extname } from "node:path";
+import { join, resolve, basename, extname, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
 
 const SCAD =
@@ -32,9 +33,15 @@ const VIEWS = {
   back: "--camera=0,0,0,90,0,180,0 --autocenter --viewall",
 };
 
+// OpenSCAD snapshots omit fonts.conf, which makes text() fall back to a zero-width
+// stroke font that renders but cannot print. Point fontconfig at the one we ship.
+const FONTCONF = join(dirname(fileURLToPath(import.meta.url)), "fonts.conf");
+
 function run(bin, args, timeoutMs = 300000) {
   return new Promise((res) => {
-    const p = spawn(bin, args, { windowsHide: true });
+    const env = { ...process.env };
+    if (bin === SCAD && !env.FONTCONFIG_FILE && existsSync(FONTCONF)) env.FONTCONFIG_FILE = FONTCONF;
+    const p = spawn(bin, args, { windowsHide: true, env });
     let out = "", err = "";
     const timer = setTimeout(() => { p.kill(); res({ code: -1, out, err: err + "\n[timed out]" }); }, timeoutMs);
     p.stdout.on("data", (d) => (out += d));
@@ -220,7 +227,9 @@ function summarizeDetail(d) {
     if (d.currentPrintSpeed) L.push(`Speed:     ${d.currentPrintSpeed} mm/s (adjust ${d.printSpeedAdjust}%)`);
   }
   if (d.leftFilamentType) L.push(`Filament:  ${d.leftFilamentType}`);
-  if (d.remainingDiskSpace != null) L.push(`Disk free: ${Number(d.remainingDiskSpace).toFixed(0)} MB`);
+  // Firmware reports a bare float with no unit. GB is the only reading consistent with
+  // a working printer that still has files on it.
+  if (d.remainingDiskSpace != null) L.push(`Disk free: ${Number(d.remainingDiskSpace).toFixed(2)} GB`);
   if (d.cameraStreamUrl) L.push(`Camera:    ${d.cameraStreamUrl}`);
   return L.join("\n");
 }
