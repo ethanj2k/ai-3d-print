@@ -1,0 +1,14 @@
+# Generated geometry - .scad source is the truth, these are reproducible
+*.stl
+*.3mf
+*.off
+*.amf
+*.gcode
+*.gx
+
+# Renders
+*.png
+!docs/*.png
+
+node_modules/
+.DS_Store
