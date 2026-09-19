@@ -1,11 +1,11 @@
 ---
 name: print3d-setup
-description: Install everything needed to design and 3D print with an AI agent — OpenSCAD, the BOSL2 library, FlashForge Flash Studio, and the openscad MCP server registered across Claude, Codex and Grok. Use when the print3d skill is present but its tools are missing, when setting up a new machine, or when the user asks to set up 3D printing.
+description: Install everything needed to design and 3D print with an AI agent — OpenSCAD, the BOSL2 library, FlashForge Flash Studio, the openscad MCP server, and the LAN printer dashboard. Use when the print3d skill is present but its tools are missing, when setting up a new machine, or when the user asks to set up 3D printing.
 ---
 
 # Set up prompt-to-print
 
-Installs the toolchain the `print3d` skill needs. Run once per machine.
+Installs the toolchain the `print3d` skill needs. Run once per machine. Repo: `github.com/ethanj2k/ai-3d-print`. Clone it if it is not already on disk.
 
 Do each step, verify it, then move on. Report what failed rather than continuing past it.
 
@@ -44,7 +44,7 @@ Skip if the user has no FlashForge printer, and tell them slicing and printing w
 
 ## 4. The MCP server
 
-`scripts/openscad-mcp.mjs` ships beside the `print3d` skill. It needs Node 18+ and has no dependencies.
+Needs Node 18+. `skills/print3d/scripts/openscad-mcp.mjs` ships beside the `print3d` skill. Zero dependencies.
 
 Put it somewhere stable. Leaving it in the skill folder is fine and keeps the bundle portable.
 
@@ -55,29 +55,39 @@ Register as a **stdio** server named `openscad`, command `node`, argument the sc
 - Claude — `claude mcp add`, user scope
 - Grok — `grok mcp add`, user scope
 - Codex — an `[mcp_servers.openscad]` table in its `config.toml`
-- Others — that agent's own MCP config
+- Cursor / others — that agent's own MCP config
 
 If a tool runs several agents from separate home directories, each one needs its own entry. Back up a config before editing it.
 
-Pass paths that differ from the defaults as environment variables:
+Pass paths that differ from the defaults as environment variables on the MCP server:
 
 - `OPENSCAD_BIN` — OpenSCAD binary
 - `FLASHSTUDIO_BIN` — Flash Studio executable
 - `FLASHSTUDIO_PROFILES` — its bundled `profiles/Flashforge` folder
 
-Verify: the agent lists the server as connected and can see its tools.
+Do **not** put printer IP, serial, or check code in MCP env.
+
+Verify: the agent lists the server as connected and can see `dash_preview` and `dash_await`.
 
 ## 6. Connect the printer
 
-Needed only for printing. Slicing works without it.
+Needed only for printing and the dashboard. Slicing works without it.
 
 On the printer, enable LAN mode and read off its **IP address, serial number and check code**.
 
-Copy `printer.example.json` to `printer.json` at the repo root and fill those three fields. That is the only place they live — the MCP server and the dashboard both read it. Do not put them in agent MCP env.
+Copy `printer.example.json` to `printer.json` at the **repo root** and fill those three fields. That is the only place they live — the MCP server and the dashboard both read it.
 
 Ask the user for these — they are on the printer's screen and cannot be discovered. The `printer_discover` tool finds the IP, but not the other two.
 
-## 7. Prove it works
+## 7. Dashboard
+
+Copy `printer-dashboard/config.example.json` to `printer-dashboard/config.json` and set `gcodeDirs` to the folder that holds local `.gcode` files.
+
+Start it with `printer-dashboard/run-dashboard.cmd` (or `node server.js` from that folder). It should listen on port 3470 and port 80, view-only. It must never send print, pause, cancel, or upload to the printer. It queries the printer only while a dashboard tab is open.
+
+Verify: `http://127.0.0.1:3470` loads. Tell the user the LAN URL (`http://<this-pc>`).
+
+## 8. Prove it works
 
 End to end, using the MCP tools only:
 
@@ -85,10 +95,11 @@ End to end, using the MCP tools only:
 2. Export it to STL. Must report manifold and a size that fits.
 3. Slice it. Must report a print time.
 4. If the printer is configured, read its status.
+5. If the dashboard is running, `dash_preview` that STL. Confirm the dashboard Preview tab can show it. Do not print.
 
 Report which steps passed. Then tell the user to restart their agent so the server loads, and that `print3d` is ready.
 
 ## Notes
 
-- Symlink the skill folders rather than copying, so all agents share one file.
+- Symlink the skill folders rather than copying, so all agents share one file. Claude, Codex, Grok, and Cursor should point at the same `print3d` and `print3d-setup`.
 - The slicer is a GUI-subsystem binary: it writes to a redirected stdout only, so its CLI looks silent when run from a terminal. That is normal.
