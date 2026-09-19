@@ -73,7 +73,7 @@ Needed only for printing. Slicing works without it.
 
 On the printer, enable LAN mode and read off its **IP address, serial number and check code**.
 
-Set as environment variables on the MCP server: `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE`.
+Copy `printer.example.json` to `printer.json` at the repo root and fill those three fields. That is the only place they live — the MCP server and the dashboard both read it. Do not put them in agent MCP env.
 
 Ask the user for these — they are on the printer's screen and cannot be discovered. The `printer_discover` tool finds the IP, but not the other two.
 

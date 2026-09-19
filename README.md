@@ -22,8 +22,8 @@ its own mistakes before anything reaches the printer.
 
 **`print3d`** — the design-to-print flow. Asks what you want, then either searches
 Printables/MakerWorld/Thingiverse or models it from scratch with
-[BOSL2](https://github.com/BelfrySCAD/BOSL2), shows you the result from four angles, slices,
-and prints.
+[BOSL2](https://github.com/BelfrySCAD/BOSL2), sends the result to the dashboard for
+approval, slices, and prints.
 
 **`print3d-setup`** — hand this to an agent on a fresh machine and it installs OpenSCAD,
 BOSL2, Flash Studio, and registers the MCP server across every agent you have.
@@ -42,6 +42,10 @@ BOSL2, Flash Studio, and registers the MCP server across every agent you have.
 | `printer_files` | List G-code already on the printer. |
 | `printer_print` | Upload and optionally start. |
 | `printer_job` | Pause, resume, cancel. |
+| `dash_preview` | Put an STL on the LAN dashboard for review. Does not print. |
+| `dash_await` | Wait until they tap Approve print or Revise. |
+
+**`printer-dashboard/`** — view-only LAN page. Live print status, layer toolpath, and a Print/Preview toggle so a design can be approved from the phone. It never starts, pauses, or cancels a print.
 
 ## Install
 
@@ -67,21 +71,24 @@ Point an agent at `print3d-setup` and let it do the work. Or by hand:
 
 ## Configuration
 
-All optional except the printer credentials, which are only needed to print.
+Printer **IP, serial, and check code live in one file**: copy `printer.example.json` to
+`printer.json` at the repo root and fill it in. The MCP server and the dashboard both read
+that file. Do not duplicate the values in agent MCP env.
 
 | Variable | Meaning |
 | --- | --- |
 | `OPENSCAD_BIN` | OpenSCAD binary, if not at the default path |
 | `FLASHSTUDIO_BIN` | Flash Studio executable |
 | `FLASHSTUDIO_PROFILES` | Its bundled `profiles/Flashforge` folder |
-| `PRINTER_IP` | Printer address — `printer_discover` finds it |
-| `PRINTER_SERIAL` | From the printer screen, Settings → Network |
-| `PRINTER_CHECKCODE` | Same screen |
+| `PRINTER_CONFIG` | Optional override path to `printer.json` |
 
-Serial and check code cannot be discovered over the network. Read them off the printer.
+Serial and check code cannot be discovered over the network. Read them off the printer under Settings → Network (LAN mode). `printer_discover` finds the IP.
 
-Paths default to the standard Windows install locations. On macOS and Linux, set the three
-path variables.
+Dashboard extras (listen port, local G-code folders) go in `printer-dashboard/config.json` — copy `config.example.json`. That file is not the printer login.
+
+Paths default to the standard Windows install locations. On macOS and Linux, set the three path variables.
+
+Run the dashboard with `printer-dashboard/run-dashboard.cmd` (or `start.cmd`). It listens on port 3470 and port 80, and only queries the printer while a browser tab is open.
 
 ## Notes for the Adventurer 5M
 

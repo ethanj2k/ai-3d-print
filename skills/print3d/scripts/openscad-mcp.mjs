@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { tmpdir, networkInterfaces } from "node:os";
+import { tmpdir, networkInterfaces, homedir } from "node:os";
 import { join, resolve, basename, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
@@ -156,17 +156,37 @@ function resolveFilament(name = "Flashforge Generic PLA") {
 
 // --- printer -------------------------------------------------------------
 
+function loadPrinterFile() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.env.PRINTER_CONFIG,
+    resolve(here, "../../../printer.json"),
+    join(homedir(), ".print3d", "printer.json"),
+    join(homedir(), "source", "ai-3d-print", "printer.json"),
+  ].filter(Boolean);
+  for (const p of candidates) {
+    if (!existsSync(p)) continue;
+    try {
+      const j = JSON.parse(readFileSync(p, "utf8"));
+      if (j && (j.ip || j.serial || j.checkCode)) return j;
+    } catch { /* skip bad json */ }
+  }
+  return {};
+}
+
 function creds(a = {}) {
-  const ip = a.ip || process.env.PRINTER_IP || "";
-  const serialNumber = a.serial || process.env.PRINTER_SERIAL || "";
-  const checkCode = a.checkCode || process.env.PRINTER_CHECKCODE || "";
+  const file = loadPrinterFile();
+  const ip = a.ip || process.env.PRINTER_IP || file.ip || "";
+  const serialNumber = a.serial || process.env.PRINTER_SERIAL || file.serial || "";
+  const checkCode = a.checkCode || process.env.PRINTER_CHECKCODE || file.checkCode || "";
   const missing = [];
-  if (!ip) missing.push("PRINTER_IP");
-  if (!serialNumber) missing.push("PRINTER_SERIAL");
-  if (!checkCode) missing.push("PRINTER_CHECKCODE");
+  if (!ip) missing.push("ip");
+  if (!serialNumber) missing.push("serial");
+  if (!checkCode) missing.push("checkCode");
   if (missing.length) {
     throw new Error(
-      `Missing ${missing.join(", ")}. Set as env vars on the MCP server, or pass ip/serial/checkCode per call. ` +
+      `Missing ${missing.join(", ")}. Put them in printer.json next to this repo ` +
+      `(copy printer.example.json), or ~/.print3d/printer.json. ` +
       `Serial number and check code are on the printer under Settings -> Network (LAN mode). ` +
       `Use printer_discover to find the IP.`);
   }
@@ -182,6 +202,31 @@ function netError(e, ip) {
   if (/EHOSTUNREACH|ENETUNREACH/.test(m)) return `${ip} is unreachable. Different network or printer powered off.`;
   if (/timeout|TimeoutError|ETIMEDOUT|aborted/i.test(m)) return `${ip} did not respond within the timeout. Printer asleep or wrong IP.`;
   return `Could not reach ${ip}:${PORT} (${m}). Run printer_discover to find the printer.`;
+}
+
+const DASH_URLS = (process.env.DASH_URL || "http://127.0.0.1:3470,http://127.0.0.1")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+
+async function dash(path, opts = {}) {
+  let last = "dashboard unreachable";
+  for (const base of DASH_URLS) {
+    try {
+      const r = await fetch(base.replace(/\/$/, "") + path, {
+        method: opts.method || "GET",
+        headers: opts.headers,
+        body: opts.body,
+        signal: AbortSignal.timeout(8000),
+      });
+      const t = await r.text();
+      let json;
+      try { json = JSON.parse(t); }
+      catch { throw new Error(t.slice(0, 200) || `HTTP ${r.status}`); }
+      if (!r.ok) throw new Error(json.error || t.slice(0, 200));
+      json._url = base.replace(/\/$/, "");
+      return json;
+    } catch (e) { last = e; }
+  }
+  throw new Error(String(last?.message || last));
 }
 
 async function api(path, body, { ip, serialNumber, checkCode }) {
@@ -324,7 +369,23 @@ const TOOLS = [
         quality: { type: "string", enum: ["fine", "standard", "draft"], default: "standard",
           description: "On a 0.4 nozzle: fine=0.12mm, standard=0.20mm, draft=0.24mm." },
         filament: { type: "string", default: "Flashforge Generic PLA",
-          description: "Filament profile name. A partial name returns close matches." },
+          description: "Filament profile name. A partial name returns close matches. " +
+            "Use \"Flashforge Generic PETG\" when PETG is loaded - the temps differ a lot." },
+        bedType: { type: "string", default: "High Temp Plate",
+          enum: ["High Temp Plate", "Textured PEI Plate", "Engineering Plate", "Cool Plate"],
+          description: "Leave as the default. The 5M's stock plate is High Temp Plate; " +
+            "the others pull bed temps from generic profiles and run far too cold." },
+        fuzzySkin: { type: "string", enum: ["none", "external", "all"], default: "none",
+          description: "Roughen the walls for a matte, suede/plush surface - the 'teddy' or " +
+            "boucle look. \"external\" textures only the outer walls (what you almost always " +
+            "want); \"all\" includes internal walls too. This is generated at slice time and " +
+            "CANNOT be added to finished G-code, so set it here rather than re-slicing later." },
+        fuzzySkinThickness: { type: "number", default: 0.3,
+          description: "mm the wall wanders in and out. 0.2 is subtle, 0.3 is a clear fabric " +
+            "texture, 0.5+ starts to look ragged and blurs fine detail." },
+        fuzzySkinPointDistance: { type: "number", default: 0.8,
+          description: "mm between displacement points. Smaller is a finer grain but slower; " +
+            "0.8 is a good default, below 0.4 the extra moves add real print time." },
       },
       required: ["stl"],
     },
@@ -384,6 +445,31 @@ const TOOLS = [
         ip: { type: "string" }, serial: { type: "string" }, checkCode: { type: "string" },
       },
       required: ["action"],
+    },
+  },
+  {
+    name: "dash_preview",
+    description:
+      "Put an STL on the printer dashboard in Preview mode for the user to review. Does not print. " +
+      "Returns preview id and the dashboard URL. Then call dash_await.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stl: { type: "string", description: "Path to the .stl (absolute or project-relative)." },
+        name: { type: "string", description: "Label on the dashboard." },
+      },
+      required: ["stl"],
+    },
+  },
+  {
+    name: "dash_await",
+    description:
+      "Block until the user taps Approve print or Revise on the dashboard. Returns approved or rejected. Does not print.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Preview id from dash_preview. Defaults to the current preview." },
+      },
     },
   },
 ];
@@ -446,12 +532,35 @@ async function call(name, a = {}) {
       const fit = fitReport(stl);
       if (fit.includes("DOES NOT FIT")) return text(fit, true);
     }
-    const { machinePath, processPath } = resolveProfiles(a);
+    const { machinePath, processPath: systemProcess } = resolveProfiles(a);
     const filamentPath = resolveFilament(a.filament);
     const dir = mkdtempSync(join(tmpdir(), "slice-"));
+
+    // Fuzzy Skin is a toolpath effect decided while slicing - there is nothing to
+    // patch into finished G-code, so it has to be set before the CLI runs. Flashforge's
+    // profiles omit the fuzzy_* keys entirely and inherit Orca's "none", so overlay them
+    // onto a copy of the system process profile and hand the CLI that copy. "inherits"
+    // still resolves against the system profile DB, so only these keys change.
+    const fuzzy = a.fuzzySkin || "none";
+    let processPath = systemProcess;
+    if (fuzzy !== "none") {
+      const p = JSON.parse(readFileSync(systemProcess, "utf8"));
+      // Orca stores every process value as a string, including the numeric ones.
+      p.fuzzy_skin = fuzzy;
+      p.fuzzy_skin_thickness = String(a.fuzzySkinThickness ?? 0.3);
+      p.fuzzy_skin_point_distance = String(a.fuzzySkinPointDistance ?? 0.8);
+      processPath = join(dir, "fuzzy_process.json");
+      writeFileSync(processPath, JSON.stringify(p, null, 2));
+    }
+    // Without this the CLI defaults to "Cool Plate", whose temps come from the generic
+    // Orca base profile, not from Flashforge's. That silently gives a 35C bed for PETG.
+    // Flashforge only curates hot_plate_temp for the 5M (PLA 55/50, PETG 70), so the
+    // stock PEI plate is "High Temp Plate" as far as these profiles are concerned.
+    const bedType = a.bedType || "High Temp Plate";
     const r = await run(SLICER, [
       "--load-settings", `${machinePath};${processPath}`,
       "--load-filaments", filamentPath,
+      "--curr-bed-type", bedType,
       "--slice", "0", "--outputdir", dir, stl,
     ], 600000);
     const produced = readdirSync(dir).filter((f) => f.endsWith(".gcode") || f.endsWith(".gx"));
@@ -460,17 +569,34 @@ async function call(name, a = {}) {
     }
     const out = resolve(PROJECT(), a.out || basename(stl, extname(stl)) + ".gcode");
     renameSync(join(dir, produced[0]), out);
-    const head = readFileSync(out, "utf8").slice(0, 4000).split(/\r?\n/);
+    const gcode = readFileSync(out, "utf8");
+    const head = gcode.slice(0, 4000).split(/\r?\n/);
     const grab = (re) => (head.find((l) => re.test(l)) || "").replace(/^;\s*/, "").trim();
+
+    // Report the temperatures the printer will actually run, read back from the
+    // commands rather than the profile - that mismatch is exactly what hides a bad
+    // bed type. PETG below 60C on the bed warps off the plate partway up.
+    const bed = Number((gcode.match(/^M190 S(\d+)/m) || [])[1]);
+    const noz = Number((gcode.match(/^M109 S(\d+)/m) || [])[1]);
+    const isPET = /Filament: .*PETG/i.test(basename(filamentPath)) || /PETG/i.test(basename(filamentPath));
+    const warn = isPET && bed && bed < 60
+      ? `\nWARNING: bed ${bed}C is too cold for PETG - it will warp off the plate. Expected ~70C.`
+      : "";
     return text([
       `Sliced -> ${out}  (${(statSync(out).size / 1024).toFixed(0)} KB)`,
       `Machine:  ${basename(machinePath, ".json")}`,
       `Process:  ${basename(processPath, ".json")}`,
       `Filament: ${basename(filamentPath, ".json")}`,
+      `Plate:    ${bedType}`,
+      `Temps:    nozzle ${noz || "?"}C, bed ${bed || "?"}C`,
+      fuzzy !== "none"
+        ? `Fuzzy:    ${fuzzy}, ${a.fuzzySkinThickness ?? 0.3}mm thick, ` +
+          `${a.fuzzySkinPointDistance ?? 0.8}mm point spacing`
+        : "",
       grab(/estimated printing time/i),
       grab(/total layer number/i),
       grab(/filament used \[mm\]/i),
-    ].filter(Boolean).join("\n"));
+    ].filter(Boolean).join("\n") + warn, !!warn);
   }
 
   if (name === "printer_discover") {
@@ -537,6 +663,46 @@ async function call(name, a = {}) {
     const c = creds(a);
     await api("/control", { payload: { cmd: "jobCtl_cmd", args: { jobID: String(a.jobId ?? "0"), action: a.action } } }, c);
     return text(`Sent "${a.action}" to the current job.`);
+  }
+
+  if (name === "dash_preview") {
+    const stl = resolve(PROJECT(), a.stl || "");
+    if (!existsSync(stl) || extname(stl).toLowerCase() !== ".stl") {
+      return text(`No STL at ${stl}`, true);
+    }
+    const j = await dash("/api/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stl, name: a.name || basename(stl, ".stl") }),
+    });
+    return text(
+      `Preview ${j.status}  id=${j.id}\n` +
+      `Dashboard: ${j._url || "http://127.0.0.1"}\n` +
+      `Tell the user to open it and use the Preview tab. Then call dash_await.`,
+    );
+  }
+
+  if (name === "dash_await") {
+    const want = a.id || "";
+    let watchId = want;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 30 * 60 * 1000) {
+      const j = await dash("/api/preview");
+      if (j.status === "pending") {
+        if (want && j.id && j.id !== want) {
+          return text(`Preview was replaced (${j.id}). Call dash_preview again.`, true);
+        }
+        watchId = j.id || watchId;
+      } else if (j.status === "approved" || j.status === "rejected") {
+        if (want && j.id === want) return text(`${j.status}${j.name ? ` — ${j.name}` : ""}`);
+        if (!want && watchId && j.id === watchId) return text(`${j.status}${j.name ? ` — ${j.name}` : ""}`);
+        // Leftover decision from a previous review — wait for a new pending preview.
+      } else if (j.status === "none") {
+        if (want || watchId) return text("No preview on the dashboard.", true);
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return text("Still waiting for Approve print or Revise on the dashboard.", true);
   }
 
   throw new Error(`Unknown tool: ${name}`);

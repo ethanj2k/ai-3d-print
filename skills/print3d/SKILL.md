@@ -30,9 +30,17 @@ Write OpenSCAD using BOSL2.
 Fix what is wrong. Repeat until it matches the request.
 
 **5. Show** — design-only, or review = yes
-`scad_render` with views `["iso","front","side","top"]`. Post every image.
-Stop. Wait.
-Revise and re-render until they approve.
+Send the design to the preview dashboard and monitor the approval. Do not post review photos in chat.
+Modelled from scratch: `scad_export` to STL first. Downloaded: use that file.
+Example:
+
+```
+dash_preview  stl="C:\Users\ethan\source\3dprint\part.stl"  name="part"
+dash_await    id="<id from dash_preview>"
+```
+
+Tell them to open the dashboard and use Preview. Stop. Wait.
+Revise and send again until they tap Approve print.
 Design-only ends here: give the file path, done.
 
 Review = no: skip to 6 without pausing.
