@@ -548,6 +548,8 @@ button.go:disabled { opacity: 0.4; cursor: not-allowed; }
   .review-bar { left: 12px; right: 12px; top: 12px; flex-wrap: wrap; }
   .review-actions { width: 100%; }
   .review-actions button { flex: 1; }
+  /* Out of the review bar's way — nothing else occupies the bottom in review mode. */
+  .back-btn { top: auto; bottom: 12px; left: 12px; }
   .pane-body { padding: 16px 14px 40px; }
   .pane-head { padding: 14px; }
   .cards { grid-template-columns: 1fr; }

@@ -493,8 +493,11 @@ document.addEventListener("keydown", (e) => {
 /* --- view routing ------------------------------------------------------ */
 
 function setView(view) {
+  const changed = view !== state.view;
   state.view = view;
   document.body.dataset.view = view;
+  // On a phone the page scrolls, so a new view would otherwise open part-way down.
+  if (changed) window.scrollTo(0, 0);
   const navView = view === "review" ? "projects" : view;
   for (const b of modesEl.querySelectorAll("button")) {
     b.classList.toggle("on", b.dataset.view === navView);
