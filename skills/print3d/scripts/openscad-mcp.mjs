@@ -229,6 +229,12 @@ async function dash(path, opts = {}) {
   throw new Error(String(last?.message || last));
 }
 
+const dashJson = (path, body) => dash(path, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 async function api(path, body, { ip, serialNumber, checkCode }) {
   let r;
   try {
@@ -448,28 +454,124 @@ const TOOLS = [
     },
   },
   {
-    name: "dash_preview",
+    name: "project_create",
     description:
-      "Put an STL on the printer dashboard in Preview mode for the user to review. Does not print. " +
-      "Returns preview id and the dashboard URL. Then call dash_await.",
+      "Create a project on the dashboard. A project is a directory under the projects root plus a " +
+      "database record; every model you design for this job goes in it. Call this once at the start " +
+      "of a job, before designing. Returns the project slug and its directory - write your .scad, " +
+      ".stl and .gcode there.",
     inputSchema: {
       type: "object",
       properties: {
-        stl: { type: "string", description: "Path to the .stl (absolute or project-relative)." },
-        name: { type: "string", description: "Label on the dashboard." },
+        name: { type: "string", description: "Human name, e.g. \"Cable Clip\"." },
+        notes: { type: "string", description: "What the user asked for, in a sentence." },
+        tags: { type: "array", items: { type: "string" }, description: "e.g. [\"hot-wheels\", \"functional\"]." },
       },
-      required: ["stl"],
+      required: ["name"],
     },
   },
   {
-    name: "dash_await",
+    name: "project_list",
     description:
-      "Block until the user taps Approve print or Revise on the dashboard. Returns approved or rejected. Does not print.",
+      "List projects with their item counts and how many items are waiting on the user. " +
+      "Use to find an existing project before creating a new one.",
+    inputSchema: {
+      type: "object",
+      properties: { search: { type: "string", description: "Filter by name, note, item name or tag." } },
+    },
+  },
+  {
+    name: "project_get",
+    description: "Full detail for one project: every item, its status, revisions, notes and past prints.",
+    inputSchema: {
+      type: "object",
+      properties: { project: { type: "string", description: "Project slug." } },
+      required: ["project"],
+    },
+  },
+  {
+    name: "item_add",
+    description:
+      "Add a printable item to a project, or add a new revision to an existing one (same name = new " +
+      "revision, keeping the old). The files are copied into the project directory. This puts the item " +
+      "in front of the user for review - then call item_await. Does not print.",
     inputSchema: {
       type: "object",
       properties: {
-        id: { type: "string", description: "Preview id from dash_preview. Defaults to the current preview." },
+        project: { type: "string", description: "Project slug from project_create." },
+        name: { type: "string", description: "Item name, e.g. \"Clip body\". Reuse it to add a revision." },
+        stl: { type: "string", description: "Path to the .stl - this is what the user sees in 3D." },
+        scad: { type: "string", description: "Path to the .scad source, if you modelled it." },
+        gcode: { type: "string", description: "Path to the sliced .gcode, if you have sliced it already." },
+        note: { type: "string", description: "What changed in this revision." },
+        tags: { type: "array", items: { type: "string" } },
       },
+      required: ["project", "name", "stl"],
+    },
+  },
+  {
+    name: "item_await",
+    description:
+      "Block until the user approves or revises this item on the dashboard. Returns the decision and " +
+      "their note. On \"rejected\", read the note, fix the model and call item_add again with the same " +
+      "name. Does not print.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        item: { type: "number", description: "Item id from item_add." },
+        timeoutMinutes: { type: "number", default: 30 },
+      },
+      required: ["item"],
+    },
+  },
+  {
+    name: "queue_add",
+    description:
+      "Add approved items to the print queue, in the order given. Queued items do not print on their " +
+      "own - the user releases each one from the dashboard once the plate is clear.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: { type: "array", items: { type: "number" }, description: "Item ids, in print order." },
+        note: { type: "string" },
+      },
+      required: ["items"],
+    },
+  },
+  {
+    name: "queue_await",
+    description:
+      "Block until the user releases the next queue entry (they tap \"Bed clear - release\" after " +
+      "peeling off, cleaning and gluing the plate). Returns the entry with its g-code path so you can " +
+      "send it with printer_print. Call this before every print in a queue - never skip ahead.",
+    inputSchema: {
+      type: "object",
+      properties: { timeoutMinutes: { type: "number", default: 120 } },
+    },
+  },
+  {
+    name: "queue_done",
+    description:
+      "Mark a queue entry finished after its print ends. Use result \"done\" or \"failed\". " +
+      "The dashboard usually detects this itself from the printer; call it when you know better.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entry: { type: "number", description: "Queue entry id from queue_await." },
+        result: { type: "string", enum: ["done", "failed", "skipped"], default: "done" },
+        note: { type: "string" },
+      },
+      required: ["entry"],
+    },
+  },
+  {
+    name: "print_history",
+    description:
+      "Recent prints with result, duration and filament used, plus lifetime totals. " +
+      "Use to answer \"what have I printed\" and to check whether a part printed well before.",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "number", default: 20 } },
     },
   },
 ];
@@ -665,44 +767,179 @@ async function call(name, a = {}) {
     return text(`Sent "${a.action}" to the current job.`);
   }
 
-  if (name === "dash_preview") {
+  if (name === "project_create") {
+    const j = await dashJson("/api/projects", {
+      name: a.name,
+      notes: a.notes || "",
+      tags: a.tags || [],
+    });
+    return text([
+      `Project "${j.name}" created.`,
+      `slug:      ${j.slug}`,
+      `directory: ${j.dir}`,
+      ``,
+      `Write the .scad, .stl and .gcode for this job into that directory,`,
+      `then item_add each printable part.`,
+    ].join("\n"));
+  }
+
+  if (name === "project_list") {
+    const q = a.search ? `?q=${encodeURIComponent(a.search)}` : "";
+    const j = await dash(`/api/projects${q}`);
+    if (!j.projects.length) return text("No projects yet. Use project_create.");
+    const L = j.projects.map((p) => {
+      const bits = [`${p.item_count} items`];
+      if (p.pending_count) bits.push(`${p.pending_count} awaiting review`);
+      if (p.approved_count) bits.push(`${p.approved_count} approved`);
+      return `${p.slug.padEnd(22)} ${p.name.padEnd(24)} ${bits.join(", ")}`;
+    });
+    return text(L.join("\n"));
+  }
+
+  if (name === "project_get") {
+    const p = await dash(`/api/projects/${encodeURIComponent(a.project)}`);
+    const L = [`${p.name}  (${p.slug})`, p.dir];
+    if (p.notes) L.push(p.notes);
+    if (p.tags?.length) L.push(`tags: ${p.tags.join(", ")}`);
+    L.push("", "Items:");
+    for (const it of p.items) {
+      const r = it.revision;
+      L.push(`  [${it.id}] ${it.name}  —  ${it.status}${r ? ` (v${r.rev})` : ""}`);
+      if (r?.gcode_path) L.push(`        gcode ${r.gcode_path}`);
+      else if (r?.stl_path) L.push(`        stl   ${r.stl_path}`);
+      for (const n of (it.notes || []).slice(0, 3)) L.push(`        note: ${n.body}`);
+    }
+    if (p.prints?.length) {
+      L.push("", "Recent prints:");
+      for (const pr of p.prints.slice(0, 8)) {
+        L.push(`  ${pr.result.padEnd(10)} ${pr.gcode_name}  ${fmtDuration(pr.actual_seconds)}`);
+      }
+    }
+    return text(L.join("\n"));
+  }
+
+  if (name === "item_add") {
     const stl = resolve(PROJECT(), a.stl || "");
     if (!existsSync(stl) || extname(stl).toLowerCase() !== ".stl") {
       return text(`No STL at ${stl}`, true);
     }
-    const j = await dash("/api/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stl, name: a.name || basename(stl, ".stl") }),
-    });
-    return text(
-      `Preview ${j.status}  id=${j.id}\n` +
-      `Dashboard: ${j._url || "http://127.0.0.1"}\n` +
-      `Tell the user to open it and use the Preview tab. Then call dash_await.`,
-    );
+    const body = { project: a.project, name: a.name, stl, note: a.note || "", tags: a.tags || [] };
+    for (const k of ["scad", "gcode"]) {
+      if (!a[k]) continue;
+      const p = resolve(PROJECT(), a[k]);
+      if (!existsSync(p)) return text(`No ${k} at ${p}`, true);
+      body[k] = p;
+    }
+    const j = await dashJson("/api/items", body);
+    const r = j.revision;
+    const stats = [
+      r.layer_count ? `${r.layer_count} layers` : "",
+      r.est_seconds ? fmtDuration(r.est_seconds) : "",
+      r.filament_g ? `${r.filament_g} g` : "",
+    ].filter(Boolean).join(", ");
+    return text([
+      `"${j.item.name}" is revision ${r.rev} of item ${j.item.id}, waiting for review.`,
+      stats ? `Sliced: ${stats}` : "",
+      ``,
+      `Tell the user to open the dashboard, go to Projects -> ${j.item.projectName}, and review it.`,
+      `Then call item_await with item=${j.item.id} and stop until it returns.`,
+    ].filter(Boolean).join("\n"));
   }
 
-  if (name === "dash_await") {
-    const want = a.id || "";
-    let watchId = want;
-    const t0 = Date.now();
-    while (Date.now() - t0 < 30 * 60 * 1000) {
-      const j = await dash("/api/preview");
-      if (j.status === "pending") {
-        if (want && j.id && j.id !== want) {
-          return text(`Preview was replaced (${j.id}). Call dash_preview again.`, true);
+  if (name === "item_await") {
+    const id = Number(a.item);
+    const deadline = Date.now() + (Number(a.timeoutMinutes) || 30) * 60 * 1000;
+    const start = await dash(`/api/items/${id}`);
+    const watchRev = start.revision?.id;
+    while (Date.now() < deadline) {
+      const it = await dash(`/api/items/${id}`);
+      const r = it.revision;
+      if (r && r.id === watchRev && (r.decision === "approved" || r.decision === "rejected")) {
+        const note = r.decision_note || it.notes?.[0]?.body || "";
+        if (r.decision === "approved") {
+          return text([
+            `APPROVED — "${it.name}" v${r.rev}.`,
+            note ? `User note: ${note}` : "",
+            `Slice it, then queue_add [${it.id}] if there is more than one part to print.`,
+          ].filter(Boolean).join("\n"));
         }
-        watchId = j.id || watchId;
-      } else if (j.status === "approved" || j.status === "rejected") {
-        if (want && j.id === want) return text(`${j.status}${j.name ? ` — ${j.name}` : ""}`);
-        if (!want && watchId && j.id === watchId) return text(`${j.status}${j.name ? ` — ${j.name}` : ""}`);
-        // Leftover decision from a previous review — wait for a new pending preview.
-      } else if (j.status === "none") {
-        if (want || watchId) return text("No preview on the dashboard.", true);
+        return text([
+          `REVISE — "${it.name}" v${r.rev} was sent back.`,
+          note ? `User note: ${note}` : "No note given — ask what they want changed.",
+          `Fix the model and call item_add again with the same project and name.`,
+        ].join("\n"));
       }
-      await new Promise((r) => setTimeout(r, 1000));
+      if (r && r.id !== watchRev) {
+        return text(`A newer revision (v${r.rev}) was added. Await that one instead.`, true);
+      }
+      await new Promise((r2) => setTimeout(r2, 1500));
     }
-    return text("Still waiting for Approve print or Revise on the dashboard.", true);
+    return text(`Still waiting for a decision on item ${id}. Ask the user to review it on the dashboard.`, true);
+  }
+
+  if (name === "queue_add") {
+    const j = await dashJson("/api/queue", { items: a.items, note: a.note || "" });
+    const L = j.queue.map((e, i) =>
+      `  ${i + 1}. ${e.item_name}  (${e.state}${e.decision !== "approved" ? ", NOT APPROVED" : ""})`);
+    return text([
+      `Queued ${a.items.length} item(s). Queue is now:`,
+      ...L,
+      ``,
+      `Nothing prints until the user releases each entry. Call queue_await.`,
+    ].join("\n"));
+  }
+
+  if (name === "queue_await") {
+    const deadline = Date.now() + (Number(a.timeoutMinutes) || 120) * 60 * 1000;
+    while (Date.now() < deadline) {
+      const j = await dash("/api/queue");
+      const ready = j.queue.find((e) => e.state === "ready");
+      if (ready) {
+        return text([
+          `RELEASED — the plate is clear and "${ready.item_name}" is next.`,
+          `entry:   ${ready.id}`,
+          `project: ${ready.project_name}`,
+          ready.gcode_path ? `gcode:   ${ready.gcode_path}` : `No gcode yet — slice ${ready.stl_path} first.`,
+          ``,
+          `Send it with printer_print, then queue_done entry=${ready.id} when it finishes.`,
+        ].join("\n"));
+      }
+      if (!j.queue.length) return text("The queue is empty.", true);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    return text("Still waiting for the user to release the next queue entry.", true);
+  }
+
+  if (name === "queue_done") {
+    const state = a.result === "failed" ? "failed" : a.result === "skipped" ? "skipped" : "done";
+    await dashJson(`/api/queue/${Number(a.entry)}/state`, { state, note: a.note || "" });
+    const j = await dash("/api/queue");
+    const next = j.queue.find((e) => e.state === "waiting");
+    return text([
+      `Entry ${a.entry} marked ${state}.`,
+      next
+        ? `Next up: "${next.item_name}". Tell the user to peel it off, clean and glue the plate, then release it. Call queue_await.`
+        : `Queue is empty.`,
+    ].join("\n"));
+  }
+
+  if (name === "print_history") {
+    const j = await dash(`/api/prints?limit=${Number(a.limit) || 20}`);
+    const t = j.stats?.totals || {};
+    const L = j.prints.map((p) => [
+      (p.result || "").padEnd(10),
+      (p.item_name || p.gcode_name).padEnd(28),
+      fmtDuration(p.actual_seconds).padStart(8),
+      p.filament_g ? `${Number(p.filament_g).toFixed(1)}g`.padStart(8) : "       -",
+      p.outcome ? ` ${p.outcome}` : "",
+    ].join(" "));
+    return text([
+      `${t.prints || 0} prints, ${t.completed || 0} completed, ${t.failed || 0} failed.`,
+      `${t.filament_g ? (t.filament_g / 1000).toFixed(2) : 0} kg filament, ` +
+      `${t.seconds ? (t.seconds / 3600).toFixed(1) : 0} h machine time.`,
+      "",
+      ...L,
+    ].join("\n"));
   }
 
   throw new Error(`Unknown tool: ${name}`);

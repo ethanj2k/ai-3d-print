@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>5M · workshop</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three.module.js" } }
+  </script>
+</head>
+<body data-view="print">
+  <div class="progress-rail" id="progress-rail"></div>
+
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <div class="name">Adventurer 5M</div>
+        <div class="sub" data-field="identity">not polled yet</div>
+      </div>
+    </div>
+
+    <nav class="modes" id="modes">
+      <button type="button" data-view="print">Print</button>
+      <button type="button" data-view="projects">Projects</button>
+      <button type="button" data-view="queue">Queue</button>
+      <button type="button" data-view="history">History</button>
+    </nav>
+
+    <div class="job-chip" data-field="job">no job</div>
+
+    <div class="state" data-state="offline">
+      <span class="dot"></span>
+      <span data-field="status">offline</span>
+    </div>
+  </header>
+
+  <!-- PRINT ------------------------------------------------------------- -->
+  <main class="view view-print">
+    <section class="stage">
+      <canvas id="view"></canvas>
+
+      <div class="hud">
+        <div class="hud-layer">
+          <span class="k">layer</span>
+          <span class="v"><span data-field="layer">—</span><span class="dim"> / </span><span data-field="layers">—</span></span>
+        </div>
+        <div class="hud-pct" data-field="pct">—</div>
+      </div>
+
+      <label class="ghost-slider">
+        <span class="k">full model <span id="ghost-val">0%</span></span>
+        <input type="range" id="ghost" min="0" max="100" value="0" step="1">
+      </label>
+
+      <div class="stage-note" id="stage-note" hidden></div>
+
+      <div class="loading" id="loading" hidden>
+        <div class="loading-card">
+          <div class="spinner" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="loading-text" id="loading-text">loading model</div>
+          <div class="loading-sub mono" id="loading-sub"></div>
+        </div>
+      </div>
+
+      <div class="review-bar" id="review-bar" hidden>
+        <div class="review-copy">
+          <div class="k" id="review-where">project</div>
+          <div class="review-name" id="review-name">design</div>
+          <div class="review-meta mono" id="review-meta"></div>
+        </div>
+        <div class="review-actions">
+          <button type="button" id="review-note-btn">Note</button>
+          <button type="button" id="review-reject">Revise</button>
+          <button type="button" class="go" id="review-approve">Approve</button>
+        </div>
+      </div>
+
+      <button type="button" class="back-btn" id="review-back" hidden>← back</button>
+    </section>
+
+    <aside class="rail">
+      <section class="block refresh" id="refresh-block">
+        <div class="refresh-row">
+          <span class="k">auto refresh</span>
+          <button type="button" class="toggle" id="live-toggle" role="switch" aria-checked="true">
+            <span class="knob"></span>
+          </button>
+        </div>
+        <div class="refresh-row">
+          <span class="mono tiny" id="refresh-note">polling every 2s</span>
+          <button type="button" class="ghost-btn" id="refresh-now">Refresh</button>
+        </div>
+      </section>
+
+      <section class="block times">
+        <div>
+          <div class="k">elapsed</div>
+          <div class="v mono" data-field="elapsed">—</div>
+        </div>
+        <div>
+          <div class="k">remaining</div>
+          <div class="v mono" data-field="remaining">—</div>
+        </div>
+      </section>
+
+      <section class="block temps">
+        <div class="temp">
+          <div class="temp-head">
+            <span class="k">nozzle</span>
+            <span class="mono"><span data-field="noz">—</span><span class="dim"> → </span><span data-field="nozTarget">—</span></span>
+          </div>
+          <div class="bar"><i id="noz-bar"></i></div>
+        </div>
+        <div class="temp">
+          <div class="temp-head">
+            <span class="k">bed</span>
+            <span class="mono"><span data-field="bed">—</span><span class="dim"> → </span><span data-field="bedTarget">—</span></span>
+          </div>
+          <div class="bar bed"><i id="bed-bar"></i></div>
+        </div>
+      </section>
+
+      <section class="block facts">
+        <div><span class="k">filament</span><span data-field="filament">—</span></div>
+        <div><span class="k">speed</span><span data-field="speed">—</span></div>
+        <div><span class="k">cooling fan</span><span data-field="fan">—</span></div>
+        <div><span class="k">z offset</span><span data-field="zoff">—</span></div>
+        <div><span class="k">nozzle</span><span data-field="nozzleModel">—</span></div>
+        <div><span class="k">firmware</span><span data-field="fw">—</span></div>
+        <div><span class="k">disk</span><span data-field="disk">—</span></div>
+      </section>
+
+      <div class="block up-next" id="up-next" hidden></div>
+
+      <p class="fine">View only. This page never starts, pauses or cancels a print.</p>
+    </aside>
+  </main>
+
+  <!-- PROJECTS ---------------------------------------------------------- -->
+  <section class="view view-projects pane">
+    <div class="pane-head">
+      <input type="search" id="project-search" placeholder="search projects, items, tags" autocomplete="off">
+      <div class="tag-row" id="tag-row"></div>
+    </div>
+    <div class="pane-body" id="projects-body"></div>
+  </section>
+
+  <!-- QUEUE ------------------------------------------------------------- -->
+  <section class="view view-queue pane">
+    <div class="pane-head">
+      <h2>Print queue</h2>
+      <p class="hint">Nothing advances on its own. Peel off, clean and glue the plate, then release the next item.</p>
+    </div>
+    <div class="pane-body" id="queue-body"></div>
+  </section>
+
+  <!-- HISTORY ----------------------------------------------------------- -->
+  <section class="view view-history pane">
+    <div class="pane-head">
+      <h2>Print history</h2>
+      <div class="stat-row" id="stat-row"></div>
+    </div>
+    <div class="pane-body" id="history-body"></div>
+  </section>
+
+  <!-- prompt ------------------------------------------------------------ -->
+  <div class="sheet" id="sheet" hidden>
+    <div class="sheet-card">
+      <div class="k" id="sheet-title">note</div>
+      <textarea id="sheet-input" rows="3" placeholder="what should change?"></textarea>
+      <div class="sheet-actions">
+        <button type="button" id="sheet-cancel">Cancel</button>
+        <button type="button" class="go" id="sheet-ok">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

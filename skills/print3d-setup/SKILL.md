@@ -44,7 +44,7 @@ Skip if the user has no FlashForge printer, and tell them slicing and printing w
 
 ## 4. The MCP server
 
-Needs Node 18+. `skills/print3d/scripts/openscad-mcp.mjs` ships beside the `print3d` skill. Zero dependencies.
+Needs Node 18+ (the dashboard in step 7 needs **Node 22+** for `node:sqlite`). `skills/print3d/scripts/openscad-mcp.mjs` ships beside the `print3d` skill. Zero dependencies.
 
 Put it somewhere stable. Leaving it in the skill folder is fine and keeps the bundle portable.
 
@@ -67,7 +67,7 @@ Pass paths that differ from the defaults as environment variables on the MCP ser
 
 Do **not** put printer IP, serial, or check code in MCP env.
 
-Verify: the agent lists the server as connected and can see `dash_preview` and `dash_await`.
+Verify: the agent lists the server as connected and can see `project_create`, `item_add`, `item_await`, `queue_add` and `queue_await`.
 
 ## 6. Connect the printer
 
@@ -81,11 +81,40 @@ Ask the user for these — they are on the printer's screen and cannot be discov
 
 ## 7. Dashboard
 
-Copy `printer-dashboard/config.example.json` to `printer-dashboard/config.json` and set `gcodeDirs` to the folder that holds local `.gcode` files.
+The dashboard is the review surface: projects, approvals, the print queue and
+print history. It stores state in SQLite via `node:sqlite`, so it needs
+**Node 22 or newer** — check `node --version` on whatever binary the launcher
+uses, not just what is on PATH. A machine can easily have an old Node in
+`C:\Program Files\nodejs` and a newer one elsewhere; `run-dashboard.cmd` picks
+the newest it can find and the server refuses to start with a clear message on
+anything older.
 
-Start it with `printer-dashboard/run-dashboard.cmd` (or `node server.js` from that folder). It should listen on port 3470 and port 80, view-only. It must never send print, pause, cancel, or upload to the printer. It queries the printer only while a dashboard tab is open.
+Pick a **library** directory to hold all 3D work, and put the dashboard inside it:
 
-Verify: `http://127.0.0.1:3470` loads. Tell the user the LAN URL (`http://<this-pc>`).
+```
+<library>\dashboard\      the server (copy the repo's dashboard/ here)
+<library>\projects\       one directory per project, created by the agent
+```
+
+Copy `dashboard/config.example.json` to `dashboard/config.json` and set:
+
+- `library` — the library root
+- `projectsRoot` — `<library>\projects`
+- `gcodeDirs` — where local `.gcode` lives (the library root is usually right)
+- `pollMs` — how often to read the printer while auto-refresh is on
+
+Start it with `dashboard/run-dashboard.cmd` (or `node server.js` from that
+folder). It listens on 3470 and 80, **view only** — it must never send print,
+pause, cancel or upload. It reads the printer only while a tab has auto-refresh
+switched on; with the toggle off it makes no requests at all except the manual
+Refresh button.
+
+To start it at boot, use **one** scheduled task pointing at `run-hidden.vbs`.
+Two tasks, or a task with both a startup and a logon trigger, will race for
+ports 3470/80 and the loser restarts forever.
+
+Verify: `http://127.0.0.1:3470` loads and `/api/info` reports the right
+`projectsRoot` and `db`. Tell the user the LAN URL (`http://<this-pc>`).
 
 ## 8. Prove it works
 
@@ -95,7 +124,10 @@ End to end, using the MCP tools only:
 2. Export it to STL. Must report manifold and a size that fits.
 3. Slice it. Must report a print time.
 4. If the printer is configured, read its status.
-5. If the dashboard is running, `dash_preview` that STL. Confirm the dashboard Preview tab can show it. Do not print.
+5. If the dashboard is running: `project_create` a throwaway project,
+   `item_add` that STL to it, confirm it appears under Projects on the
+   dashboard and the 3D model loads. Do not print. Delete the test project
+   directory afterwards.
 
 Report which steps passed. Then tell the user to restart their agent so the server loads, and that `print3d` is ready.
 

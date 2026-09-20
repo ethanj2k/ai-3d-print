@@ -22,14 +22,13 @@ its own mistakes before anything reaches the printer.
 
 **`print3d`** — the design-to-print flow. Asks what you want, then either searches
 Printables/MakerWorld/Thingiverse or models it from scratch with
-[BOSL2](https://github.com/BelfrySCAD/BOSL2), sends the result to the dashboard for
-approval, slices, and prints.
+[BOSL2](https://github.com/BelfrySCAD/BOSL2), files the result in a project, waits for
+your approval on the dashboard, slices, and prints.
 
 **`print3d-setup`** — hand this to an agent on a fresh machine and it installs OpenSCAD,
 BOSL2, Flash Studio, and registers the MCP server across every agent you have.
 
-**`skills/print3d/scripts/openscad-mcp.mjs`** — the server. Node 18+, zero dependencies,
-~600 lines.
+**`skills/print3d/scripts/openscad-mcp.mjs`** — the server. Node 18+, zero dependencies.
 
 | Tool | Does |
 | --- | --- |
@@ -42,10 +41,28 @@ BOSL2, Flash Studio, and registers the MCP server across every agent you have.
 | `printer_files` | List G-code already on the printer. |
 | `printer_print` | Upload and optionally start. |
 | `printer_job` | Pause, resume, cancel. |
-| `dash_preview` | Put an STL on the LAN dashboard for review. Does not print. |
-| `dash_await` | Wait until they tap Approve print or Revise. |
+| `project_create` / `project_list` / `project_get` | A project is a directory plus a record. Everything for one job lives in it. |
+| `item_add` | Add a printable part, or a new revision of one, and put it up for review. |
+| `item_await` | Block until they approve it or send it back with a note. |
+| `queue_add` | Queue approved items in print order. |
+| `queue_await` | Block until they release the next one. |
+| `queue_done` | Close out a queue entry. |
+| `print_history` | Past prints, durations, filament used, lifetime totals. |
 
-**`printer-dashboard/`** — view-only LAN page. Live print status, layer toolpath, and a Print/Preview toggle so a design can be approved from the phone. It never starts, pauses, or cancels a print.
+**`dashboard/`** — the LAN page you review from. **View only**: it never starts, pauses,
+cancels or uploads.
+
+- **Print** — live status and the layer-by-layer toolpath of the running job, with an
+  auto-refresh toggle. Switch it off and the server makes *no* printer requests at all
+  until you tap Refresh.
+- **Projects** — every project and part, searchable and taggable, with revision history
+  and notes. Approve or send back a part from your phone, rotating the real STL in 3D.
+- **Queue** — parts queued in print order. Nothing advances on its own: you peel the last
+  part off, clean and glue the plate, then release the next one. It refuses to release
+  while the printer is busy, or to release a part you never approved.
+- **History** — what printed, how long it took, how much filament it ate, and how it went.
+
+State lives in SQLite (`node:sqlite`), so the dashboard needs **Node 22+**.
 
 ## Install
 
@@ -84,11 +101,30 @@ that file. Do not duplicate the values in agent MCP env.
 
 Serial and check code cannot be discovered over the network. Read them off the printer under Settings → Network (LAN mode). `printer_discover` finds the IP.
 
-Dashboard extras (listen port, local G-code folders) go in `printer-dashboard/config.json` — copy `config.example.json`. That file is not the printer login.
-
 Paths default to the standard Windows install locations. On macOS and Linux, set the three path variables.
 
-Run the dashboard with `printer-dashboard/run-dashboard.cmd` (or `start.cmd`). It listens on port 3470 and port 80, and only queries the printer while a browser tab is open.
+### Dashboard
+
+Pick a **library** directory for all your 3D work and put the dashboard inside it:
+
+```
+<library>/dashboard/     copy this repo's dashboard/ here
+<library>/projects/      one directory per project, created for you
+```
+
+Copy `dashboard/config.example.json` to `dashboard/config.json` and set `library`,
+`projectsRoot` and `gcodeDirs`. That file is not the printer login.
+
+Run it with `dashboard/run-dashboard.cmd` (or `start.cmd`). It listens on port 3470 and
+port 80. It reads the printer only while a tab has auto-refresh on; with the toggle off
+it makes no requests at all except the manual Refresh button.
+
+Already have a pile of loose `.scad`/`.stl`/`.gcode` in the library root?
+`node dashboard/migrate.js` groups them into projects and seeds the database — it prints
+the plan and changes nothing until you add `--apply`.
+
+If you start it at boot, use **one** scheduled task. Two tasks — or one task with both a
+startup and a logon trigger — will race for ports 3470/80 and the loser restarts forever.
 
 ## Notes for the Adventurer 5M
 

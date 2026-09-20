@@ -15,5 +15,5 @@ node_modules/
 
 # Printer LAN credentials — copy printer.example.json to printer.json
 printer.json
-printer-dashboard/config.json
-printer-dashboard/preview/
+dashboard/config.json
+dashboard/data/

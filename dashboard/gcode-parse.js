@@ -1,7 +1,64 @@
 // Parse Flash Studio / Orca G-code into per-layer extrusion line segments.
 // Absolute XYZ, relative or absolute E. Skips travels, wipes, unretracts.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, openSync, readSync, closeSync } from "node:fs";
+
+// Flash Studio writes every stat we care about into a header block in the first
+// few KB, so read that much rather than the whole (often 20 MB+) file.
+export function gcodeStats(filePath) {
+  let head = "";
+  try {
+    const fd = openSync(filePath, "r");
+    try {
+      const buf = Buffer.alloc(8192);
+      head = buf.subarray(0, readSync(fd, buf, 0, buf.length, 0)).toString("utf8");
+    } finally { closeSync(fd); }
+  } catch { return null; }
+
+  const grab = (re) => {
+    const m = head.match(re);
+    return m ? m[1].trim() : "";
+  };
+  const layers = Number(grab(/; total layers count = (\d+)/)) ||
+    Number(grab(/; total layer number: (\d+)/)) || null;
+  const type = grab(/type="(\w+)"/) || grab(/right_extruder_material:(\w+)/) || null;
+
+  // Some Flash Studio profiles ship filament_density = 0, so the slicer writes
+  // "0.00 g". Volume is always right, so fall back to volume x density.
+  let filamentG = Number(grab(/; total filament used \[g\] = ([\d.]+)/)) ||
+    Number(grab(/; filament used \[g\] = ([\d.]+)/)) || 0;
+  let derived = false;
+  if (!filamentG) {
+    const cm3 = Number(grab(/; filament used \[cm3\] = ([\d.]+)/)) || 0;
+    const headerDensity = Number(grab(/; filament_density: ([\d.]+)/)) || 0;
+    const density = headerDensity || DENSITY[String(type || "").toUpperCase()] || DENSITY.PLA;
+    if (cm3) { filamentG = Math.round(cm3 * density * 100) / 100; derived = true; }
+  }
+
+  return {
+    layerCount: layers,
+    filamentG: filamentG || null,
+    filamentDerived: derived,
+    filamentType: type,
+    estSeconds: durationToSeconds(grab(/; estimated printing time \(normal mode\) = ([^\n\r]+)/)),
+    maxZ: Number(grab(/; max_z_height: ([\d.]+)/)) || null,
+  };
+}
+
+// g/cm3, manufacturer nominal.
+const DENSITY = { PLA: 1.24, PETG: 1.27, ABS: 1.04, ASA: 1.07, TPU: 1.21, PA: 1.14, PC: 1.20 };
+
+// "1h 51m 3s" -> 6663
+export function durationToSeconds(s) {
+  if (!s) return null;
+  let total = 0;
+  let saw = false;
+  for (const [, n, unit] of String(s).matchAll(/(\d+(?:\.\d+)?)\s*([hms])/gi)) {
+    saw = true;
+    total += Number(n) * (unit.toLowerCase() === "h" ? 3600 : unit.toLowerCase() === "m" ? 60 : 1);
+  }
+  return saw ? Math.round(total) : null;
+}
 
 export const TYPE_IDS = {
   Custom: 1,
