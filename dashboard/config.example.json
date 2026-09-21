@@ -5,5 +5,10 @@
   "projectsRoot": "C:\\path\\to\\your\\3d-models\\projects",
   "gcodeDirs": [
     "C:\\path\\to\\your\\3d-models"
-  ]
+  ],
+  "filament": {
+    "spoolGrams": 1100,
+    "spoolCost": 20,
+    "currency": "$"
+  }
 }

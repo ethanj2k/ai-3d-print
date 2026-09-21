@@ -136,11 +136,14 @@ body[data-view="history"]  .view-history { display: grid; }
 
 main.view-print { grid-template-columns: 1fr 300px; }
 
-/* In review mode the live HUD is meaningless. */
+/* In review mode the live printer readings are noise — the rail belongs to the
+   part being reviewed. On a phone the rail is the bottom bar, which is where
+   the part's numbers are readable instead of squeezed into the top overlay. */
 body[data-view="review"] .hud,
 body[data-view="review"] .ghost-slider,
 body[data-view="review"] .times,
 body[data-view="review"] .temps,
+body[data-view="review"] .facts,
 body[data-view="review"] .up-next { display: none; }
 body[data-view="print"] .review-bar,
 body[data-view="print"] .back-btn { display: none !important; }
@@ -344,9 +347,34 @@ button.go:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 .bar.bed i { background: linear-gradient(90deg, #3a2210, #d4783c, #f0b27a); }
 
-.facts { display: grid; gap: 10px; }
-.facts > div { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
-.facts > div span:last-child { font-family: var(--mono); font-size: 12px; }
+.facts, .review-facts { display: grid; gap: 10px; }
+.facts > div, .review-facts > div {
+  display: flex; justify-content: space-between; gap: 12px; font-size: 13px;
+}
+.facts > div span:last-child,
+.review-facts > div span:last-child { font-family: var(--mono); font-size: 12px; }
+.review-facts[hidden] { display: none; }
+/* Reviewing: the part's numbers come before the printer's controls. Matters
+   most on a phone, where the rail is the bottom bar and you scroll to it. */
+body[data-view="review"] .review-facts { order: -1; }
+.review-facts .cost { color: var(--hot); }
+.review-facts .headline {
+  display: block;
+  font-size: 26px;
+  font-weight: 600;
+  font-family: var(--sans);
+  margin-top: 2px;
+}
+.review-facts .headline-row { display: block; }
+.review-facts .headline .cost { font-size: 17px; font-weight: 500; }
+.review-facts .unsliced {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+}
 
 .up-next { border: 1px solid var(--line); padding: 12px; display: grid; gap: 8px; }
 .up-next[hidden] { display: none; }
@@ -487,6 +515,7 @@ button.go:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .stat-row { display: flex; flex-wrap: wrap; gap: 22px; }
 .stat .v { font-size: 22px; font-weight: 600; font-family: var(--mono); margin-top: 3px; }
+.stat .v.cost { color: var(--hot); }
 
 .empty { color: var(--muted); font-size: 13px; padding: 30px 0; text-align: center; }
 

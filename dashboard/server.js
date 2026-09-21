@@ -71,6 +71,13 @@ const CFG = {
   // whichever library config.json points at.
   db: resolve(process.env.DASH_DB || fileCfg.db || join(LIBRARY, "dashboard.db")),
   pollMs: Number(process.env.DASH_POLL_MS || fileCfg.pollMs || 2000),
+  // What a spool costs, so grams can be shown as money. Defaults to a 1.1 kg
+  // spool at $20 — override per filament in config.json.
+  filament: {
+    spoolGrams: Number(fileCfg.filament?.spoolGrams) || 1100,
+    spoolCost: Number(fileCfg.filament?.spoolCost) || 20,
+    currency: fileCfg.filament?.currency || "$",
+  },
   gcodeDirs: (process.env.GCODE_DIRS
     ? process.env.GCODE_DIRS.split(";").map((s) => s.trim()).filter(Boolean)
     : fileCfg.gcodeDirs) || [LIBRARY],
@@ -341,6 +348,11 @@ function statePayload() {
   return {
     ...lastStatus,
     stale: !lastStatus.ts || Date.now() - lastStatus.ts > CFG.pollMs * 3,
+    pollMs: CFG.pollMs,
+    filament: {
+      ...CFG.filament,
+      perGram: CFG.filament.spoolCost / CFG.filament.spoolGrams,
+    },
     polling: Boolean(pollTimer),
     viewers: clients.size,
     liveViewers: liveViewers(),

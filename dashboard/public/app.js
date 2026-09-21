@@ -66,6 +66,14 @@ function fmtWhen(iso) {
 }
 
 const fmtG = (g) => (g == null ? "—" : `${Number(g).toFixed(Number(g) < 10 ? 2 : 0)} g`);
+
+// Filament priced off the spool cost the server was configured with.
+function fmtCost(grams) {
+  const f = state.filament;
+  if (grams == null || !f?.perGram) return "—";
+  return `${f.currency}${(Number(grams) * f.perGram).toFixed(2)}`;
+}
+const gAndCost = (g) => (g == null ? "" : `${fmtG(g)} · ${fmtCost(g)}`);
 const fmtBytes = (n) => (n > 1e6 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
 
 // A 27 MB toolpath takes real seconds to arrive, so report progress instead of
@@ -446,6 +454,7 @@ const state = {
   tag: "",
   live: localStorage.getItem("autoRefresh") !== "0",
   pollMs: 2000,
+  filament: { spoolGrams: 1100, spoolCost: 20, currency: "$", perGram: 20 / 1100 },
 };
 
 async function api(path, opts = {}) {
@@ -561,6 +570,7 @@ function applyState(msg) {
   state.queue = msg.queue || [];
   state.pendingReviews = msg.pendingReviews || [];
   if (msg.pollMs) state.pollMs = msg.pollMs;
+  if (msg.filament?.perGram) state.filament = msg.filament;
 
   const d = msg.detail || {};
   const online = Boolean(msg.online);
@@ -726,7 +736,7 @@ function renderProjectDetail(body) {
         r ? `v${r.rev}` : "no file",
         r?.layer_count ? `${r.layer_count} layers` : "",
         r?.est_seconds ? fmtDuration(r.est_seconds) : "",
-        r?.filament_g ? fmtG(r.filament_g) : "",
+        gAndCost(r?.filament_g),
       ].filter(Boolean);
       return `
       <div class="row" data-item="${it.id}">
@@ -748,7 +758,7 @@ function renderProjectDetail(body) {
       <div class="row">
         <div class="row-main">
           <div class="row-name">${esc(pr.item_name || pr.gcode_name)}</div>
-          <div class="row-sub">${fmtWhen(pr.started_at)} · ${fmtDuration(pr.actual_seconds || 0)} · ${fmtG(pr.filament_g)}</div>
+          <div class="row-sub">${fmtWhen(pr.started_at)} · ${fmtDuration(pr.actual_seconds || 0)} · ${gAndCost(pr.filament_g) || '—'}</div>
         </div>
         <span class="pill" data-status="${esc(pr.result)}">${esc(pr.result)}</span>
         <div class="row-actions"></div>
@@ -783,24 +793,48 @@ function renderReviewBar() {
   const it = state.item;
   const bar = $("#review-bar");
   const back = $("#review-back");
-  if (!it) { bar.hidden = true; back.hidden = true; return; }
+  const facts = $("#review-facts");
+  if (!it) { bar.hidden = true; back.hidden = true; facts.hidden = true; return; }
   bar.hidden = false;
   back.hidden = false;
+
   $("#review-where").textContent = it.projectName || "project";
   $("#review-name").textContent = it.name;
-  const r = it.revision;
-  const s = state.item.size;
-  $("#review-meta").textContent = [
-    r ? `v${r.rev}` : "",
-    s ? `${s.x.toFixed(0)} × ${s.y.toFixed(0)} × ${s.z.toFixed(0)} mm` : "",
-    r?.est_seconds ? fmtDuration(r.est_seconds) : "",
-    r?.filament_g ? fmtG(r.filament_g) : "",
-    it.status,
-  ].filter(Boolean).join("  ·  ");
+
   const decided = it.status === "approved" || it.status === "rejected";
   $("#review-approve").textContent = it.status === "approved" ? "Approved" : "Approve";
   $("#review-approve").disabled = it.status === "approved";
   $("#review-reject").disabled = decided && it.status === "rejected";
+
+  // The numbers live in the rail — the sidebar on a desktop, the bottom bar on
+  // a phone — where they have room to be read.
+  const r = it.revision;
+  const s = it.size;
+  const row = (k, v, cls = "") => (v ? `<div><span class="k">${k}</span><span class="${cls}">${v}</span></div>` : "");
+  const sliced = Boolean(r?.est_seconds || r?.filament_g);
+  const rows = [
+    sliced
+      ? `<div class="headline-row"><span class="k">print time</span>
+           <span class="headline">${fmtDuration(r.est_seconds)}</span></div>
+         <div class="headline-row"><span class="k">filament</span>
+           <span class="headline">${fmtG(r.filament_g)}<span class="cost"> · ${fmtCost(r.filament_g)}</span></span></div>`
+      : `<div class="unsliced">Not sliced yet — time, filament and cost appear once it is.</div>`,
+    row("size", s ? `${s.x.toFixed(0)} × ${s.y.toFixed(0)} × ${s.z.toFixed(0)} mm` : ""),
+    row("layers", r?.layer_count ? String(r.layer_count) : ""),
+    row("material", r?.filament_type || ""),
+    row("revision", r ? `v${r.rev}` : ""),
+    row("status", it.status),
+  ].filter(Boolean).join("");
+
+  const notes = (it.notes || []).slice(0, 3);
+  facts.innerHTML = rows + (notes.length
+    ? `<div class="notes">${notes.map((n) => `
+        <div class="note-item">
+          <div class="note-body">${esc(n.body)}</div>
+          <div class="note-when">${fmtWhen(n.created_at)}</div>
+        </div>`).join("")}</div>`
+    : "");
+  facts.hidden = false;
 }
 
 async function decide(action) {
@@ -890,7 +924,7 @@ function renderQueue() {
         <div class="row-name">${esc(e.item_name)}</div>
         <div class="row-sub">${esc(e.project_name)}${e.rev ? ` · v${e.rev}` : ""}${
           e.est_seconds ? ` · ${fmtDuration(e.est_seconds)}` : ""}${
-          e.filament_g ? ` · ${fmtG(e.filament_g)}` : ""}${
+          e.filament_g ? ` · ${gAndCost(e.filament_g)}` : ""}${
           e.decision !== "approved" ? " · not approved" : ""}</div>
       </div>
       <span class="pill" data-status="${esc(e.state)}">${esc(e.state)}</span>
@@ -924,6 +958,8 @@ async function loadHistory() {
     <div class="stat"><div class="k">failed</div><div class="v">${t.failed || 0}</div></div>
     <div class="stat"><div class="k">filament</div><div class="v">${
       t.filament_g ? `${(t.filament_g / 1000).toFixed(2)} kg` : "—"}</div></div>
+    <div class="stat"><div class="k">spent</div><div class="v cost">${
+      t.filament_g ? fmtCost(t.filament_g) : "—"}</div></div>
     <div class="stat"><div class="k">machine time</div><div class="v">${
       t.seconds ? `${(t.seconds / 3600).toFixed(1)} h` : "—"}</div></div>`;
 
@@ -933,7 +969,7 @@ async function loadHistory() {
         <div class="row-name">${esc(p.item_name || p.gcode_name)}</div>
         <div class="row-sub">${esc(p.project_name || "unfiled")} · ${fmtWhen(p.started_at)}${
           p.actual_seconds ? ` · ${fmtDuration(p.actual_seconds)}` : ""}${
-          p.filament_g ? ` · ${fmtG(p.filament_g)}` : ""}${
+          p.filament_g ? ` · ${gAndCost(p.filament_g)}` : ""}${
           p.last_layer && p.layers ? ` · layer ${p.last_layer}/${p.layers}` : ""}${
           p.outcome ? ` · ${esc(p.outcome)}` : ""}</div>
       </div>
