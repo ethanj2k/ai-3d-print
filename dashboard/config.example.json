@@ -1,9 +1,9 @@
 {
   "port": 3470,
   "pollMs": 2000,
-  "library": "C:\\Users\\you\\source\\3dprint",
-  "projectsRoot": "C:\\Users\\you\\source\\3dprint\\projects",
+  "library": "C:\\path\\to\\your\\3d-models",
+  "projectsRoot": "C:\\path\\to\\your\\3d-models\\projects",
   "gcodeDirs": [
-    "C:\\Users\\you\\source\\3dprint"
+    "C:\\path\\to\\your\\3d-models"
   ]
 }

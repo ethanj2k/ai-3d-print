@@ -53,7 +53,11 @@ function loadPrinterFile() {
 }
 
 const printer = loadPrinterFile();
-const LIBRARY = resolve(process.env.PRINT_LIBRARY || fileCfg.library || join(ROOT, ".."));
+
+// Your models are yours and live outside this repo — point `library` in
+// config.json at wherever you keep them. With no config at all we fall back to
+// a `library/` folder beside the checkout, so a fresh clone runs as-is.
+const LIBRARY = resolve(process.env.PRINT_LIBRARY || fileCfg.library || join(ROOT, "..", "library"));
 
 const CFG = {
   ip: process.env.PRINTER_IP || printer.ip || "",
@@ -62,7 +66,10 @@ const CFG = {
   port: Number(process.env.DASH_PORT || fileCfg.port || 3470),
   library: LIBRARY,
   projectsRoot: resolve(process.env.PROJECTS_ROOT || fileCfg.projectsRoot || join(LIBRARY, "projects")),
-  db: resolve(process.env.DASH_DB || fileCfg.db || join(ROOT, "data", "dashboard.db")),
+  // The database describes the library, not the code, so it lives with the
+  // library. That keeps this repo pure tooling and lets one checkout serve
+  // whichever library config.json points at.
+  db: resolve(process.env.DASH_DB || fileCfg.db || join(LIBRARY, "dashboard.db")),
   pollMs: Number(process.env.DASH_POLL_MS || fileCfg.pollMs || 2000),
   gcodeDirs: (process.env.GCODE_DIRS
     ? process.env.GCODE_DIRS.split(";").map((s) => s.trim()).filter(Boolean)

@@ -89,11 +89,14 @@ uses, not just what is on PATH. A machine can easily have an old Node in
 the newest it can find and the server refuses to start with a clear message on
 anything older.
 
-Pick a **library** directory to hold all 3D work, and put the dashboard inside it:
+The dashboard runs from the repo. The user's models stay **outside** it, in a
+**library** directory of their own — ask where that should be, or use an existing
+folder of `.scad`/`.stl` if they already have one.
 
 ```
-<library>\dashboard\      the server (copy the repo's dashboard/ here)
+<repo>\dashboard\         the server, run from here
 <library>\projects\       one directory per project, created by the agent
+<library>\dashboard.db    SQLite store, lives with the data it describes
 ```
 
 Copy `dashboard/config.example.json` to `dashboard/config.json` and set:
@@ -102,6 +105,9 @@ Copy `dashboard/config.example.json` to `dashboard/config.json` and set:
 - `projectsRoot` — `<library>\projects`
 - `gcodeDirs` — where local `.gcode` lives (the library root is usually right)
 - `pollMs` — how often to read the printer while auto-refresh is on
+
+Never copy the dashboard into the library — one copy, in the repo, or the two
+drift apart.
 
 Start it with `dashboard/run-dashboard.cmd` (or `node server.js` from that
 folder). It listens on 3470 and 80, **view only** — it must never send print,

@@ -105,26 +105,35 @@ Paths default to the standard Windows install locations. On macOS and Linux, set
 
 ### Dashboard
 
-Pick a **library** directory for all your 3D work and put the dashboard inside it:
+**Your models stay out of this repo.** This repo is the tool; your `.scad` files,
+downloads and print history live in a **library** directory of your own, wherever you
+keep it. Clone this anywhere and point it at that.
 
 ```
-<library>/dashboard/     copy this repo's dashboard/ here
-<library>/projects/      one directory per project, created for you
+ai-3d-print/dashboard/     the server — runs from here
+<your library>/projects/   one directory per project, created for you
+<your library>/dashboard.db   SQLite store, sits with the data it describes
 ```
 
 Copy `dashboard/config.example.json` to `dashboard/config.json` and set `library`,
-`projectsRoot` and `gcodeDirs`. That file is not the printer login.
+`projectsRoot` and `gcodeDirs`. That file is gitignored, and it is not the printer login.
+With no config at all the dashboard uses a `library/` folder beside the checkout, so a
+fresh clone runs as-is.
 
 Run it with `dashboard/run-dashboard.cmd` (or `start.cmd`). It listens on port 3470 and
 port 80. It reads the printer only while a tab has auto-refresh on; with the toggle off
 it makes no requests at all except the manual Refresh button.
 
-Already have a pile of loose `.scad`/`.stl`/`.gcode` in the library root?
+Already have a pile of loose `.scad`/`.stl`/`.gcode` in your library root?
 `node dashboard/migrate.js` groups them into projects and seeds the database — it prints
 the plan and changes nothing until you add `--apply`.
 
 If you start it at boot, use **one** scheduled task. Two tasks — or one task with both a
 startup and a logon trigger — will race for ports 3470/80 and the loser restarts forever.
+
+The database is plain SQLite in WAL mode. If you ever move or back up `dashboard.db`,
+take the `-wal` file with it or run `PRAGMA wal_checkpoint(TRUNCATE)` first — recent
+writes live in the WAL until it is checkpointed, and copying the `.db` alone loses them.
 
 ## Notes for the Adventurer 5M
 
